@@ -4,7 +4,7 @@
 
 ;; Author: Steve Kemp
 ;; Maintainer: Steve Kemp
-;; Version: 1.7
+;; Version: 1.8
 ;; Package-Requires: ((emacs "28.0") (org "9.0"))
 ;; Keywords: outlines, contacts, people
 ;; URL: https://github.com/skx/org-people
@@ -103,6 +103,9 @@
 
 ;;; Version history (brief)
 
+;;
+;; 1.8 - Improvement: Filtering on :TAGS property in `M-x org-people-summary`
+;;       uses sub-string matches of entries, rather than membership testing.
 ;;
 ;; 1.7 - BugFix: First column in org-people-summary-properties is used as the
 ;;       default sort key.  Now allows a width to be defined too.
