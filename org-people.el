@@ -763,12 +763,17 @@ We just make the name bold."
     ;; Filter list
     (let ((filtered
            (org-people-filter
-            (lambda (plist)
-              (let ((v (plist-get plist prop)))
-                (cond
-                 ((listp v) (member value v))
-                 ((stringp v) (string-match value v))
-                 (t nil)))))))
+             (lambda (plist)
+               (let ((v (plist-get plist prop)))
+                 (cond
+                  ((listp v)
+                   (seq-some (lambda (item)
+                               (and (stringp item)
+                                    (string-match-p value item)))
+                             v))
+                  ((stringp v)
+                   (string-match-p value v))
+                  (t nil)))))))
       ;; Refresh buffer
       (with-current-buffer org-people-summary-buffer-name
         (let ((inhibit-read-only t))
