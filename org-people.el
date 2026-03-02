@@ -4,7 +4,7 @@
 
 ;; Author: Steve Kemp
 ;; Maintainer: Steve Kemp
-;; Version: 1.6
+;; Version: 1.7
 ;; Package-Requires: ((emacs "28.0") (org "9.0"))
 ;; Keywords: outlines, contacts, people
 ;; URL: https://github.com/skx/org-people
@@ -103,6 +103,9 @@
 
 ;;; Version history (brief)
 
+;;
+;; 1.7 - BugFix: First column in org-people-summary-properties is used as the
+;;       default sort key.  Now allows a width to be defined too.
 ;;
 ;; 1.6 - Open the property drawers when jumping to a contact, to allow
 ;;       viewing all appropriate details.
