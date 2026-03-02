@@ -567,6 +567,19 @@ using the org-people: handler."
 
     (pop-to-buffer buf)))
 
+
+(defun org-people--open-properties ()
+  "Open the property drawer beneath current headline."
+  (save-excursion
+    (org-back-to-heading t)
+    (outline-show-subtree)
+    (when (re-search-forward org-property-drawer-re
+                             (save-excursion (org-end-of-subtree t t))
+                             t)
+      (org-flag-region (match-beginning 0)
+                       (match-end 0)
+                       nil))))
+
 (defun org-people-browse-name (&optional name)
   "Open the Org entry for NAME.
 
@@ -579,14 +592,14 @@ This is used by our [[people:xxx]] handler."
   (let ((marker (plist-get (org-people-get-by-name name) :MARKER)))
     (switch-to-buffer (marker-buffer marker))
     (goto-char marker)
-    (org-reveal)))
+    (org-reveal)
+    (org-people--open-properties)))
 
 (defun org-people--all-plists ()
   "Return a list of all contact plists."
   (cl-loop
    for plist being the hash-values of (org-people-parse)
    collect plist))
-
 
 (defun org-people-summary--column-width (col-spec)
   "Return the width for COL-SPEC.
