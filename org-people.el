@@ -299,7 +299,7 @@ excluded from the completion."
 ;; which org-people-parse returns.
 ;;
 
-(defun org-people-names ()
+(defsubst org-people-names ()
   "Return all known contact names.
 
 This uses `org-people-parse' to get the list of parsed/discovered contacts."
@@ -403,7 +403,7 @@ not used directly."
 ;; Selection code
 ;;
 
-(defun org-people-get-by-name (name)
+(defsubst org-people-get-by-name (name)
   "Return plist for NAME from the contact-file.
 
 This is basically the way of getting all data known about a given person."
