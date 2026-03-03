@@ -234,28 +234,29 @@ We only include data from headlines which have a tag matching
 It is assumed the `org-mode' caching and parsing layer is fast
 enough that there won't be undue performance problems regardless
 of the number of contacts you have."
-  (let ((table (make-hash-table :test #'equal)))
-    (org-map-entries
-         (lambda ()
-           (let ((name (nth 4 (org-heading-components)))
-                 (plist nil)
-                 ; remove "contacts" from the tag-list
-                 (entry-tags (remove org-people-search-tag (org-get-tags))))
-             ;; Get any associated properties
-             (dolist (prop (org-entry-properties nil 'standard))
-               (let ((key (intern (concat ":" (car prop))))
-                     (val (cdr prop)))
-                 (setq plist (plist-put plist key val))))
-             ;; Save the details if we have more than one property present.
-             (when (and plist (> (/ (length plist) 2) 1))
-               (setq plist (plist-put plist :NAME name))
-               (setq plist (plist-put plist :MARKER (point-marker)))
-               (setq plist (plist-put plist :TAGS entry-tags))
-               (puthash name plist table))
-             table))
-         (concat "+" org-people-search-tag)
-         org-people-search-type)
-    table))
+  (with-delayed-message (2 (format "Parsing contacts"))
+    (let ((table (make-hash-table :test #'equal)))
+      (org-map-entries
+       (lambda ()
+         (let ((name (nth 4 (org-heading-components)))
+               (plist nil)
+                                        ; remove "contacts" from the tag-list
+               (entry-tags (remove org-people-search-tag (org-get-tags))))
+           ;; Get any associated properties
+           (dolist (prop (org-entry-properties nil 'standard))
+             (let ((key (intern (concat ":" (car prop))))
+                   (val (cdr prop)))
+               (setq plist (plist-put plist key val))))
+           ;; Save the details if we have more than one property present.
+           (when (and plist (> (/ (length plist) 2) 1))
+             (setq plist (plist-put plist :NAME name))
+             (setq plist (plist-put plist :MARKER (point-marker)))
+             (setq plist (plist-put plist :TAGS entry-tags))
+             (puthash name plist table))
+           table))
+       (concat "+" org-people-search-tag)
+       org-people-search-type)
+      table)))
 
 ;;;###autoload
 (defun org-people-insert ()
