@@ -215,12 +215,17 @@ for contacts.")
     (:FLAG  :width 5)     ; 🇬🇧 / 🇫🇮 / etc.
     (:PHONE :width 15)
     (:TAGS  :width 15))
-  "List of properties to display in `org-people-summary'.
+  "List of columns to display in `org-people-summary'.
 
 If a column would be 100% empty, i.e. no contacts have that property
-defined, then it will be removed automatically.")
+defined, then it will be removed automatically.
 
+You may add faux-properties and define titles and getter-functions
+to allow constructing arbitrary columns.")
 
+;; internal usage only
+(defvar org-people-summary--columns)
+(defvar org-people-summary--active-columns)
 
 (defvar org-people-ignored-properties
   (list :CREATED :ID :MARKER)
@@ -325,7 +330,7 @@ excluded from the completion."
 ;; which org-people-parse returns.
 ;;
 
-(defsubst org-people-names ()
+(defun org-people-names ()
   "Return all known contact names.
 
 This uses `org-people-parse' to get the list of parsed/discovered contacts."
@@ -429,7 +434,7 @@ not used directly."
 ;; Selection code
 ;;
 
-(defsubst org-people-get-by-name (name)
+(defun org-people-get-by-name (name)
   "Return plist for NAME from the contact-file.
 
 This is basically the way of getting all data known about a given person."
@@ -609,7 +614,7 @@ Example: (:NAME 30 :title \"Full Name\" :visible nil)"
 ;; ------------------------------------------------------------
 (defun org-people-summary--visible-columns ()
   "Return columns currently marked as visible."
-  (cl-remove-if-not #'org-people-column-visible org-people-summary-columns))
+  (cl-remove-if-not #'org-people-column-visible org-people-summary--columns))
 
 (defun org-people-summary--column-used-p (col plists)
   "Return t if COL has any non-empty value in PLISTS."
@@ -646,7 +651,7 @@ Handles:
                                      (let ((val (funcall (org-people-column-getter col) plist)))
                                        (and val (not (string-empty-p val)))))
                                    plists)))
-                   org-people-summary-columns))
+                   org-people-summary--columns))
          (first-col (car columns)))
     (setq-local org-people-summary--active-columns columns)
     ;; Build tabulated-list-format using :title and :width from the structs
@@ -676,7 +681,7 @@ Handles:
 (defun org-people-summary--toggle-column ()
   "Interactively toggle visibility of a column."
   (interactive)
-  (let* ((columns org-people-summary-columns)
+  (let* ((columns org-people-summary--columns)
          (names (mapcar #'org-people-column-title columns))
          (choice (completing-read "Toggle column: " names nil t))
          (col (seq-find (lambda (c) (string= (org-people-column-title c) choice))
@@ -708,7 +713,7 @@ In practice this means hide the column, after all if a column
 isn't visible then it cannot be shown so the point cannot be
 over it."
   (interactive)
-  (let* ((idx ( org-people-summary--column-at-point))
+  (let* ((idx (org-people-summary--column-at-point))
          (col (nth idx org-people-summary--active-columns)))
     (unless col
       (user-error "No column at point"))
@@ -723,7 +728,7 @@ over it."
 This reinstates any columns which might have had their visibility
 toggled interactively.  It will not restore columns which are empty."
   (interactive)
-  (dolist (col org-people-summary-columns)
+  (dolist (col org-people-summary--columns)
     (setf (org-people-column-visible col) t))
   (org-people-summary--refresh)
   (tabulated-list-print t))
@@ -894,7 +899,7 @@ This allows sorting by each column, etc.
 Filtering can be applied (using a regexp), and fields copied."
   (interactive)
   ;; Generate full column structs - always up to date
-  (setq org-people-summary-columns
+  (setq org-people-summary--columns
         (mapcar #'org-people-summary--make-column
                 org-people-summary-properties))
 
