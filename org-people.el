@@ -4,7 +4,7 @@
 
 ;; Author: Steve Kemp <steve@steve.fi>
 ;; Maintainer: Steve Kemp <steve@steve.fi>
-;; Version: 1.8.1
+;; Version: 1.9
 ;; Package-Requires: ((emacs "29.1") (org "9.0"))
 ;; Keywords: outlines, contacts, people
 ;; URL: https://github.com/skx/org-people
@@ -53,11 +53,10 @@
 ;;
 ;; The specific properties used don't matter, although it seems natural
 ;; to use :ADDRESS, :EMAIL, and :PHONE.  A contact will be recorded
-;; if there is at least one property present and the "contact" tag
-;; being present.
+;; if there is at least one property present alongside the "contact" tag.
 ;;
 ;; The name of the tag used to search for entries is specified in the
-;; org-people-search-tag variable.
+;; `org-people-search-tag' variable and can be customized.
 ;;
 
 ;;; Basic operations
@@ -69,6 +68,12 @@
 ;; `org-people-insert' allows you to interactively insert data from
 ;; your contacts with helpful TAB-completion, on the attribute name
 ;; and person.
+;;
+;; If you have links to people within your document (e.g. a link
+;; such as [[org-people:Steve Kemp]] you can use the helper
+;; `org-people-add-descriptions' to automatically add the contact
+;; description automatically.  This makes them look cleaner.
+;;
 
 ;;; org-table helpers
 
@@ -104,10 +109,17 @@
 ;;; Version history (brief)
 
 ;;
+;; 1.9  - Any column included in `org-people-summary-properties' which is 100%
+;;        empty, and not present in any known contact, will be removed.
+;;        Updated to ignore :ID and :CREATED by default in completion and in the
+;;        table-generation from `org-people-person-to-table'.
+;;        The summary-properties may override the name, width and the attribute
+;;        extraction function to make things very dynamic.
+;;
 ;; 1.8.1 - Improvement: Filtering on :TAGS property in `M-x org-people-summary`
 ;;         uses sub-string matches of entries, rather than membership testing.
 ;;
-;; 1.7 - BugFix: First column in org-people-summary-properties is used as the
+;; 1.7 - BugFix: First column in `org-people-summary-properties' is used as the
 ;;       default sort key.  Now allows a width to be defined too.
 ;;
 ;; 1.6 - Open the property drawers when jumping to a contact, to allow
@@ -133,7 +145,7 @@
 ;;       ":contact:" (by default).  This is more generally useful, and
 ;;       removes configuration and our ad-hoc caching implementation.
 ;;
-;; 0.9 - org-people-person-to-table shows all the data about one individual
+;; 0.9 - `org-people-person-to-table' shows all the data about one individual
 ;;       as an `org-mode' table.
 ;;       Added test-cases in new file, org-people-test.el
 ;;
@@ -195,26 +207,36 @@ for contacts.")
   "The name of the buffer to create when `org-people-summary' is invoked.")
 
 (defvar org-people-summary-properties
-  '((:NAME 30)
-    (:EMAIL 35)
-    (:PHONE 15)
-    (:TAGS  15))
-  "List of properties to display in `org-people-summary'.")
+  '((:NAME  :width 30)
+    (:EMAIL :width 35)
+    (:FLAG  :width 5)     ; 🇬🇧 / 🇫🇮 / etc.
+    (:PHONE :width 15)
+    (:TAGS  :width 15))
+  "List of properties to display in `org-people-summary'.
+
+If a column would be 100% empty, i.e. no contacts have that property
+defined, then it will be removed automatically.")
+
+
 
 (defvar org-people-ignored-properties
   (list :CREATED :ID :MARKER)
   "Properties which are generally ignored from contacts.
 
 These are properties which are specifically excluded when creating
-an `org-mode' table from a persons details, or when completion is
-being invoked by `org-people-insert'.")
+an `org-mode' table from a persons details with the
+`org-people-person-to-table' function, and also when completion
+is invoked by `org-people-insert'.")
 
 (defvar org-people-summary-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'org-people-summary--open)
     (define-key map (kbd "c") #'org-people-summary--copy-field)
     (define-key map (kbd "f") #'org-people-summary--filter-by-property)
+    (define-key map (kbd "R") #'org-people-summary-show-all-columns)
     (define-key map (kbd "s") #'isearch-forward)
+    (define-key map (kbd "t") #'org-people-summary--toggle-column)
+    (define-key map (kbd "T") #'org-people-summary--hide-this-column)
     (define-key map (kbd "v") #'org-people-summary--vcard)
     map)
   "Keymap for `org-people-summary-mode'.")
@@ -530,6 +552,189 @@ using the org-people: handler."
 ;; summary-buffer code, and associated helpers
 ;;
 
+
+(cl-defstruct org-people-column
+  prop        ;; :NAME, :EMAIL, etc
+  width       ;; integer
+  title       ;; string, auto-generated
+  getter      ;; function (plist -> string)
+  visible)    ;; t/nil
+
+
+;; Build a full column struct from the legacy specification
+(defun org-people-summary--make-column (spec)
+  "Create a full `org-people-column' entry from SPEC.
+
+SPEC can be:
+- a symbol, e.g. :EMAIL
+- a list starting with a symbol, followed by WIDTH and any
+  optional keyword overrides.
+
+Example: (:NAME 30 :title \"Full Name\" :visible nil)"
+  (let* ((prop (if (listp spec) (car spec) spec))
+         (plist (if (listp spec) (cdr spec) nil))
+         ;; width override: first number in list or :width
+         (width (or (cl-find-if #'numberp plist)
+                    (plist-get plist :width)
+                    20))
+         ;; visibility
+         (visible (if (plist-member plist :visible)
+                      (plist-get plist :visible)
+                    t))
+         ;; title override or auto-generated
+         (title (or (plist-get plist :title)
+                    (capitalize (substring (symbol-name prop) 1))))
+         ;; getter override or default
+         (getter (or (plist-get plist :getter)
+                     (cond
+                      ((eq prop :TAGS)
+                       (lambda (plist)
+                         (mapconcat #'identity (or (plist-get plist :TAGS) '()) ",")))
+                      (t
+                       (lambda (plist)
+                         (or (plist-get plist prop) "")))))))
+    ;; make the column struct
+    (make-org-people-column
+     :prop prop
+     :width width
+     :title title
+     :getter getter
+     :visible visible)))
+
+;; ------------------------------------------------------------
+;; Helper functions
+;; ------------------------------------------------------------
+(defun org-people-summary--visible-columns ()
+  "Return columns currently marked as visible."
+  (cl-remove-if-not #'org-people-column-visible org-people-summary-columns))
+
+(defun org-people-summary--column-used-p (col plists)
+  "Return t if COL has any non-empty value in PLISTS."
+  (let ((getter (org-people-column-getter col)))
+    (cl-some (lambda (plist)
+               (let ((val (funcall getter plist)))
+                 (and val (not (string-empty-p val)))))
+             plists)))
+
+(defun org-people-summary--active-columns (plists)
+  "Return visible columns that have at least one non-empty value in PLISTS."
+  (cl-remove-if-not (lambda (col)
+                      (org-people-summary--column-used-p col plists))
+                    (org-people-summary--visible-columns)))
+
+(defun org-people-summary--build-format (columns)
+  "Build `tabulated-list-format' from COLUMNS."
+  (vconcat
+   (mapcar (lambda (col)
+             (list (org-people-column-title col)
+                   (org-people-column-width col)
+                   t))
+           columns)))
+
+(defun org-people-summary--entry (plist)
+  "Build tabulated-list entry for PLIST."
+  (let ((columns org-people-summary--active-columns)
+        (id (or (plist-get plist :NAME) "")))
+    (list id
+          (vconcat
+           (mapcar (lambda (col)
+                     (funcall (org-people-column-getter col) plist))
+                   columns)))))
+
+
+(defun org-people-summary--refresh ()
+  "Populate `tabulated-list-entries` and rebuild the table header.
+
+Handles:
+- Dynamic removal of empty columns
+- First-column overrides for title and getter
+- Custom titles, getters, widths, visibility
+- Keeps `tabulated-list-format` in sync"
+  (let* ((plists (org-people--all-plists))
+         ;; Only include visible columns that have at least one non-empty value
+         (columns (cl-remove-if-not
+                   (lambda (col)
+                     (and (org-people-column-visible col)
+                          (cl-some (lambda (plist)
+                                     (let ((val (funcall (org-people-column-getter col) plist)))
+                                       (and val (not (string-empty-p val)))))
+                                   plists)))
+                   org-people-summary-columns))
+         (first-col (car columns))
+         (other-cols (cdr columns)))
+    (setq-local org-people-summary--active-columns columns)
+    ;; Build tabulated-list-format using :title and :width from the structs
+    (setq tabulated-list-format
+          (vconcat
+           (mapcar (lambda (col)
+                     (list (org-people-column-title col)
+                           (org-people-column-width col)
+                           t))
+                   columns)))
+    ;; Sort key reset to avoid stale-column errors
+    (setq tabulated-list-sort-key nil)
+    ;; Build entries
+    (setq tabulated-list-entries
+          (mapcar (lambda (plist)
+                    (let ((id (funcall (org-people-column-getter first-col) plist)))
+                      (list id
+                            ;; all columns including first
+                            (vconcat
+                             (mapcar (lambda (col)
+                                       (funcall (org-people-column-getter col) plist))
+                                     columns)))))
+                  plists))
+    ;; Initialize header
+    (tabulated-list-init-header)))
+
+(defun org-people-summary--toggle-column ()
+  "Interactively toggle visibility of a column."
+  (interactive)
+  (let* ((columns org-people-summary-columns)
+         (names (mapcar #'org-people-column-title columns))
+         (choice (completing-read "Toggle column: " names nil t))
+         (col (seq-find (lambda (c) (string= (org-people-column-title c) choice))
+                        columns)))
+    (when col
+      (setf (org-people-column-visible col) (not (org-people-column-visible col)))
+      (org-people-summary--refresh)
+      (tabulated-list-print t))))
+
+(defun org-people-summary--column-at-point ()
+  "Return index of column at point."
+  (let ((pos (current-column))
+        (i 0)
+        (offset 0)
+        (cols (append tabulated-list-format nil)))
+    (catch 'done
+      (dolist (col cols)
+        (let ((width (nth 1 col)))
+          (when (<= pos (+ offset width))
+            (throw 'done i))
+          (setq offset (+ offset width tabulated-list-padding))
+          (setq i (1+ i))))
+      nil)))
+
+(defun org-people-summary--hide-this-column ()
+  "Toggle the visibility of the column under the point."
+  (interactive)
+  (let* ((idx ( org-people-summary--column-at-point))
+         (col (nth idx org-people-summary--active-columns)))
+    (unless col
+      (user-error "No column at point"))
+    (setf (org-people-column-visible col) nil)
+    (org-people-summary--refresh)
+    (tabulated-list-print t)
+    (message "Column '%s' hidden" (org-people-column-title col))))
+
+(defun org-people-summary-show-all-columns ()
+  "Show all columns."
+  (interactive)
+  (dolist (col org-people-summary-columns)
+    (setf (org-people-column-visible col) t))
+  (org-people-summary--refresh)
+  (tabulated-list-print t))
+
 (defun org-people-export-to-vcard (contact)
   "Pop up a new buffer containing CONTACT (a plist) formatted as a vCard 3.0."
   (interactive)
@@ -590,111 +795,26 @@ using the org-people: handler."
                        (match-end 0)
                        nil))))
 
-(defun org-people-browse-name (&optional name)
-  "Open the Org entry for NAME.
-
-If NAME is not set then prompt for it interactively.
-
-This is used by our [[people:xxx]] handler."
-  (interactive)
-  (if (not name)
-      (setq name (org-people-select-interactively)))
-  (let ((marker (plist-get (org-people-get-by-name name) :MARKER)))
-    (switch-to-buffer (marker-buffer marker))
-    (goto-char marker)
-    (org-reveal)
-    (org-people--open-properties)))
-
 (defun org-people--all-plists ()
   "Return a list of all contact plists."
   (cl-loop
    for plist being the hash-values of (org-people-parse)
    collect plist))
 
-(defun org-people-summary--column-width (col-spec)
-  "Return the width for COL-SPEC.
-
-COL-SPEC can be a symbol (:NAME) or a list (:PROP WIDTH).
-Defaults are used if WIDTH is not specified."
-  (cond
-   ;; (:PROP WIDTH) → use WIDTH
-   ((and (listp col-spec) (symbolp (car col-spec)) (numberp (cadr col-spec)))
-    (cadr col-spec))
-
-   ;; just a symbol → default width
-   ((symbolp col-spec)
-    (pcase col-spec
-      (:NAME 30)
-      (:EMAIL 35)
-      (:PHONE 15)
-      (:TAGS  15)
-      (_ 20)))  ; fallback for new properties
-
-   ;; fallback in case of weird input
-   (t 20)))
-
-(defun org-people-summary--format ()
-  "Build `tabulated-list-format' from `org-people-summary-properties'.
-
-Supports `(:PROP WIDTH)` style for custom widths."
-  (vconcat
-   (mapcar
-    (lambda (entry)
-      (let ((prop (if (listp entry) (car entry) entry)))
-        (list
-         (capitalize (substring (symbol-name prop) 1))
-         (org-people-summary--column-width entry)
-         t)))
-    org-people-summary-properties)))
 
 (define-derived-mode org-people-summary-mode tabulated-list-mode "Org-People"
   "Major mode for listing Org People contacts."
-  (setq tabulated-list-format (org-people-summary--format))
   (setq tabulated-list-padding 2)
+  (setq tabulated-list-sort-key '("Name" . nil))
+  (org-people-summary--refresh)
+  (tabulated-list-init-header)
+  (tabulated-list-print))
 
-  ;; Default sort = first column
-  ;; We support both ":NAME" and ":NAME WIDTH" here, via the consp test.
-  (setq tabulated-list-sort-key
-        (let* ((first (car org-people-summary-properties))
-               (name  (if (consp first)
-                          (car first)
-                        first)))
-          (cons (capitalize
-                 (substring
-                  (symbol-name name) 1))
-                nil)))
 
-  (add-hook 'tabulated-list-revert-hook
-            #'org-people-summary--refresh
-            nil t)
+;;
+;; summary-buffer functions bound to keys
+;;
 
-  (tabulated-list-init-header))
-
-(defun org-people-summary--entry (plist)
-  "Convert PLIST to a `tabulated-list-mode' entry.
-
-This formats using the value of `org-people-summary-properties' to
-format the entry for display."
-  (let* ((name  (or (plist-get plist :NAME) ""))
-         (columns
-          (mapcar
-           (lambda (entry)
-             (let ((prop (if (listp entry) (car entry) entry)))
-               (cond
-                ((eq prop :NAME) name)
-                ((eq prop :TAGS)
-                 (mapconcat #'identity
-                            (or (plist-get plist :TAGS) '())
-                            ","))
-                (t (or (plist-get plist prop) "")))))
-           org-people-summary-properties)))
-    (list name (vconcat columns))))
-
-(defun org-people-summary--refresh ()
-  "Populate `tabulated-list-entries'."
-  (setq tabulated-list-entries
-        (mapcar #'org-people-summary--entry
-                (org-people--all-plists))))
 
 (defun org-people-summary--open ()
   "Open the Org entry for the contact at point."
@@ -713,18 +833,6 @@ format the entry for display."
     (if plist
         (org-people-export-to-vcard plist)
       (user-error "No contact found: %s" name))))
-
-(defun org-people--export-person-link (path desc backend)
-  "Export a person link for BACKEND.
-PATH is the person name, DESC is the description.
-
-We just make the name bold."
-  (let ((name (or desc path)))
-    (cond
-     ((eq backend 'html)
-      (format "<strong>%s</strong>" name))
-     (t
-      name))))
 
 (defun org-people-summary--copy-field ()
   "Copy the value of the field under point to the clipboard."
@@ -793,6 +901,11 @@ This allows sorting by each column, etc.
 Filtering can be applied (using a regexp), and fields copied."
   (interactive)
 
+  ;; Generate full column structs - always up to date
+  (setq org-people-summary-columns
+        (mapcar #'org-people-summary--make-column
+                org-people-summary-properties))
+
   (let ((buf (get-buffer-create org-people-summary-buffer-name)))
     (with-current-buffer buf
       (org-people-summary-mode)
@@ -807,6 +920,34 @@ Filtering can be applied (using a regexp), and fields copied."
 ;;
 ;; Define a handler for a link of the form "org-person:XXX"
 ;;
+
+(defun org-people--export-person-link (path desc backend)
+  "Export a person link for BACKEND.
+PATH is the person name, DESC is the description.
+
+We just make the name bold."
+  (let ((name (or desc path)))
+    (cond
+     ((eq backend 'html)
+      (format "<strong>%s</strong>" name))
+     (t
+      name))))
+
+(defun org-people-browse-name (&optional name)
+  "Open the Org entry for NAME.
+
+If NAME is not set then prompt for it interactively.
+
+This is used by our [[people:xxx]] handler, as well
+as the `org-people-summary' mode."
+  (interactive)
+  (if (not name)
+      (setq name (org-people-select-interactively)))
+  (let ((marker (plist-get (org-people-get-by-name name) :MARKER)))
+    (switch-to-buffer (marker-buffer marker))
+    (goto-char marker)
+    (org-reveal)
+    (org-people--open-properties)))
 
 (org-link-set-parameters
  "org-people"

@@ -45,8 +45,7 @@ Suggested usage if you're using the traditional approach:
 ; insert a contact "thing" at the current point.
 (global-set-key (kbd "C-c p") 'org-people-insert)
 
-; show a summary/table of contacts
-; The table is sortable, filterable, & etc.
+; Show a table of all known contacts.  The table is sortable, filterable, & etc.
 (global-set-key (kbd "C-c P") 'org-people-summary)
 ```
 
@@ -115,6 +114,27 @@ No special configuration is required, although if you wish to use a different ta
 
 If you wished to limit parsing to only a single named file you could set `org-people-search-type` to be a list containing the name(s) of files to process, otherwise all agenda files will be read.
 
+Finally the configuration of the columns has been expanded, in the past we allowed setting the name and column
+width like so:
+
+```
+(setq org-people-summary-properties
+   '((:NAME 30
+     (:EMAIL 35))))
+```
+
+Now you may add optional configuration to override the column names, the width and even the function which
+populates the value.  This allows you to create dynamic values.  For example see the last item here:
+
+```
+(setq org-people-summary-properties
+      '((:NAME  :width 25)
+        (:EMAIL :width 30)
+        (:PHONE :width 15 :title "Digits")
+        :TAGS
+        (:MEOW  :getter (lambda (plist) (concat (plist-get plist :COUNTRY) " [" (plist-get plist :FLAG) "]" )))))
+```
+
 
 
 ## Limitations
@@ -182,6 +202,9 @@ The `org-people-summary` function shows a table of all your known contacts.
 
 You can customize the displayed fields, or their order, by modifying the `org-people-summary-properties` variable, which defaults to showing the name, email, phone-number and tags associated with each entry.
 
+If a given column would be 100% empty (i.e. no known contacts have a property
+with that name) then the column will be removed from display.
+
 Some keybindings are setup in the `org-people-summary-mode-map`:
 
 * `RET` jump to the definition of the contact.
@@ -189,6 +212,10 @@ Some keybindings are setup in the `org-people-summary-mode-map`:
 * `f` Filter the view, by property.
   * Even properties which are not visible can be used.
   * e.g. ":ADDRESS" "Finland" will show only Finnish residents.
+* `R` reset the state of columns.
+* `s` Initiate a search forward, via `isearch-forward`.
+* `t` Toggle visibility of a named column.
+* `T` Hide the current column.
 * `v` - Export the contact to a VCF file.
 
 
