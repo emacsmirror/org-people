@@ -619,17 +619,6 @@ Example: (:NAME 30 :title \"Full Name\" :visible nil)"
 ;; ------------------------------------------------------------
 ;; Helper functions
 ;; ------------------------------------------------------------
-(defun org-people-summary--visible-columns ()
-  "Return columns currently marked as visible."
-  (cl-remove-if-not #'org-people-column-visible org-people-summary--columns))
-
-(defun org-people-summary--column-used-p (col plists)
-  "Return t if COL has any non-empty value in PLISTS."
-  (let ((getter (org-people-column-getter col)))
-    (cl-some (lambda (plist)
-               (let ((val (funcall getter plist)))
-                 (and val (not (string-empty-p val)))))
-             plists)))
 
 (defun org-people-summary--entry (plist)
   "Build tabulated-list entry for PLIST."
