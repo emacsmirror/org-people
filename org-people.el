@@ -152,6 +152,16 @@
 ;;                      #'org-people-capf
 ;;                      nil t)))
 ;;
+
+;;; hl-line-mode
+
+;; If you want to enable `hl-line-mode` that is supported, and there are local
+;; configurations setup so that only people are highlighted - rather than any
+;; inline property blocks which might be present.
+;;
+;; Simply add this to your configuration:
+;;
+;;   (add-hook 'org-people-summary-mode-hook #'(lambda () (hl-line-mode 1)))
 ;;
 
 ;;; Code:
@@ -272,6 +282,10 @@ If nil, `org-people--parser' is called afresh every time.")
     (define-key map (kbd "c") #'org-people-summary--copy-field)
     (define-key map (kbd "s") #'isearch-forward)
     (define-key map (kbd "TAB") #'org-people-toggle-entry)
+
+    ;; (n)ext and (p)revious skip the inline properties
+    (define-key map (kbd "n") #'org-people-summary-next)
+    (define-key map (kbd "p") #'org-people-summary-prev)
 
     ;; filtering
     (define-key map (kbd "f") #'org-people-summary--filter-by-property)
@@ -769,6 +783,9 @@ Example: (:NAME 30 :title \"Full Name\" :visible nil)"
 Expanded entries show all properties, one per line, with colons neatly aligned.
 Properties in `org-people-ignored-properties` are skipped."
   (interactive)
+  ;; skip backward if we're inside the inline property list
+  (org-people-summary-move-to-contact)
+
   (let* ((id (tabulated-list-get-id))
          (start (line-end-position)))
     (when id
@@ -1041,12 +1058,31 @@ NAME should be the name of the contact to export."
           (string< (or (plist-get a :NAME) "")
                    (or (plist-get b :NAME) "")))))
 
+(defun org-people-summary--hl-line-range ()
+  "Return the range of the line to highlight.
+If current line starts with 4 spaces, highlight previous non-indented line."
+  (save-excursion
+    (beginning-of-line)
+    (if (looking-at "^    ")
+        ;; Walk backwards to find a non-indented line
+        (while (and (not (bobp))
+                    (progn
+                      (forward-line -1)
+                      (beginning-of-line)
+                      (looking-at "^    "))))
+      ;; else stay on current line
+      )
+    ;; Return bounds of chosen line
+    (cons (line-beginning-position)
+          (line-end-position))))
+
 (define-derived-mode org-people-summary-mode tabulated-list-mode "Org-People"
   "Major mode for listing Org People contacts."
   (setq-local show-trailing-whitespace nil)
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key '("Name" . nil))
   (org-people-summary--refresh)
+  (setq-local hl-line-range-function #'org-people-summary--hl-line-range)
   (tabulated-list-init-header)
   (tabulated-list-print))
 
@@ -1214,6 +1250,26 @@ of the entries is specified by `org-people-csv-export-properties'."
           (kill-new value)
           (message "Copied: %s" value))
       (message "Could not determine field under point"))))
+
+(defun org-people-summary-next ()
+  "Move the point to the beginnng of the line containing the next person.
+
+This skips over any inline properties, if any are visible."
+  (interactive)
+  (beginning-of-line)
+  (forward-line 1)
+  (while (looking-at "    ")
+    (forward-line 1)))
+
+(defun org-people-summary-prev ()
+  "Move the point to the beginnng of the line containing the previous person.
+
+This skips over any inline properties, if any are visible."
+  (interactive)
+  (beginning-of-line)
+  (forward-line -1)
+  (while (looking-at "    ")
+    (forward-line -1)))
 
 (defun org-people-summary--filter-by-property ()
   "Filter contacts interactively by a property value."
